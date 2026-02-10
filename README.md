@@ -24,7 +24,7 @@
 ---
 
 ## ⚡ Quick Start (5 minutes)
-**Pour évaluer le projet sans lire 50 pages** :
+**Pour évaluer le projet sans lire toutes les pages** :
 1. `docker-compose up -d` → Démarrer l'infrastructure
 2. http://localhost:8081 → Activer le DAG `ingestion_ventes_quotidien`
 3. Trigger manuel → Observer l'exécution dans l'UI Airflow

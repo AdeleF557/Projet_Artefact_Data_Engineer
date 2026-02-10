@@ -233,7 +233,7 @@ Le Modèle Conceptuel des Données synthétise les entités identifiées
 et les relations observées dans le jeu de données,
 sans application des règles de normalisation à ce stade.
 
-![Diagramme conceptuel des données](data_model/logical_data_model.png)
+![Diagramme conceptuel des données](./data_model/logical_data_model.png)
 
 ### Légende du diagramme
 

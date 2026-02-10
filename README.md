@@ -148,7 +148,7 @@ Le Modèle Conceptuel des Données (MCD) représente une **photographie brute de
 
 ### 4.2 Diagramme conceptuel (pré-normalisation)
 
-![Diagramme conceptuel des données](data_model/logical_data_model.png)
+![Diagramme conceptuel des données](./docs/data_model/logical_data_model.png)
 
 **Légende** :
 - 🟦 **Bleu** : Entités transactionnelles (`sales`, `sale_items`)

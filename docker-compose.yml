@@ -1,0 +1,191 @@
+# ENV COMMUNES AIRFLOW
+x-airflow-common-env: &airflow-common-env
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow123}@airflow-db:5432/airflow
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+
+  # Connexions Airflow
+  AIRFLOW_CONN_POSTGRES_ECOMMERCE: postgresql://${POSTGRES_USER:-ecommerce_user}:${POSTGRES_PASSWORD:-ecommerce123}@postgres:5432/${POSTGRES_DB:-ecommerce}
+  AIRFLOW_CONN_MINIO_S3: aws://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin123}@?endpoint_url=http://minio:9000&region_name=us-east-1
+
+  # Variables Airflow
+  AIRFLOW_VAR_MINIO_BUCKET: folder-source
+  AIRFLOW_VAR_SOURCE_FILE: sales.csv
+
+  # AUTO-CRÉATION UTILISATEUR 
+  AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+  _AIRFLOW_WWW_USER_CREATE: 'true'
+  _AIRFLOW_WWW_USER_USERNAME: admin
+  _AIRFLOW_WWW_USER_PASSWORD: admin123
+  _AIRFLOW_WWW_USER_FIRSTNAME: Adele
+  _AIRFLOW_WWW_USER_LASTNAME: Coulibaly
+  _AIRFLOW_WWW_USER_EMAIL: adele@artefact.ci
+  _AIRFLOW_WWW_USER_ROLE: Admin
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres_ecommerce
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce}
+      POSTGRES_USER: ${POSTGRES_USER:-ecommerce_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecommerce123}
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/01-init.sh
+      - ./sql:/sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ecommerce_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+      - minio_mc_config:/root/.mc
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/127.0.0.1/9000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  minio_init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin123};
+      mc mb -p local/folder-source;
+      mc cp /tmp/sales.csv local/folder-source/sales.csv;
+      "
+    volumes:
+      - ./data/source/sales.csv:/tmp/sales.csv:ro
+      - minio_mc_config:/root/.mc
+    restart: "no"
+    networks:
+      - backend
+
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: airflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:-airflow123}
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - airflow
+
+  airflow-init:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_init
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    environment:
+      <<: *airflow-common-env
+    command: >
+      bash -c "
+      echo 'Initialisation Airflow...';
+      airflow db migrate;
+      echo 'Base migrée';
+      "
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./ingestion:/opt/airflow/ingestion
+    restart: "no"
+    networks:
+      - airflow
+      - backend
+
+  airflow-webserver:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-common-env
+    ports:
+      - "8081:8080"
+    command: api-server
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./ingestion:/opt/airflow/ingestion
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - airflow
+      - backend
+
+  airflow-scheduler:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_scheduler
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+    environment:
+      <<: *airflow-common-env
+    command: airflow scheduler
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./ingestion:/opt/airflow/ingestion
+    networks:
+      - airflow
+      - backend
+
+volumes:
+  postgres_data:
+  minio_data:
+  airflow_db_data:
+  minio_mc_config:
+
+networks:
+  backend:
+    driver: bridge
+  airflow:
+    driver: bridge

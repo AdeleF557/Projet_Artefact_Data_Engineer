@@ -1,0 +1,6 @@
+apache-airflow-providers-postgres
+apache-airflow-providers-amazon
+pandas
+sqlalchemy
+psycopg2-binary
+minio

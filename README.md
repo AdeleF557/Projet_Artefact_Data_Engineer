@@ -23,6 +23,17 @@
 
 ---
 
+## ⚡ Quick Start (5 minutes)
+**Pour évaluer le projet sans lire 50 pages** :
+1. `docker-compose up -d` → Démarrer l'infrastructure
+2. http://localhost:8081 → Activer le DAG `ingestion_ventes_quotidien`
+3. Trigger manuel → Observer l'exécution dans l'UI Airflow
+4. `docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce`
+5. `SELECT * FROM vw_sales_star LIMIT 10;` → Vérifier les données
+
+**Résultat attendu** : Pipeline complet en 2-3 minutes avec données dans PostgreSQL ✅
+
+
 ## 🎯 Contexte du projet
 
 Ce projet s'inscrit dans le cadre du **challenge technique Artefact CI** pour le poste de **Stagiaire Data Engineer**. Il vise à démontrer mes compétences en ingénierie de données sur l'ensemble de la chaîne de valeur : de l'analyse exploratoire à l'orchestration de pipelines en production.
@@ -555,7 +566,6 @@ pytest tests/ --cov=ingestion --cov-report=html
 ✅ **Vues matérialisées** : Performance sur requêtes analytiques  
 ✅ **Types personnalisés** : ENUM pour contraintes métier  
 ✅ **JSON/JSONB** : Flexibilité pour évolutions futures  
-✅ **Standard de l'industrie** : Utilisé par Artefact (cf. description du poste)  
 
 **Exemple concret** :
 ```sql
@@ -570,7 +580,7 @@ ALTER TABLE sale_items
 ✅ **Compatibilité API S3** : Code réutilisable en production AWS/GCP  
 ✅ **Déploiement local** : Pas de compte cloud nécessaire pour la démo  
 ✅ **Coût zéro** : Open-source et self-hosted  
-✅ **Interface web** : Visualisation des buckets (pratique pour le recruteur)  
+✅ **Interface web** : Visualisation des buckets  
 
 ### 3. Airflow 3.x : TaskFlow API vs Operators classiques
 
@@ -579,7 +589,6 @@ ALTER TABLE sale_items
 ✅ **Lisibilité** : Code plus Pythonic et concis  
 ✅ **Type hints** : Meilleure auto-complétion IDE  
 ✅ **Gestion XCom automatique** : Pas de `ti.xcom_push/pull` manuel  
-✅ **Recommandation officielle** : Best practice Airflow 3.x  
 
 **Exemple** :
 ```python
@@ -659,14 +668,14 @@ Projet_artefact/
 │       └── sales.csv             # ⭐ Fichier fourni par Artefact
 │
 ├── 📂 docker/                    # Configurations Docker
-│   └── Dockerfile.airflow        # Image custom Airflow 3.x
+│   └── Dockerfile                # Image custom Airflow 3.x
 │
 ├── 📂 docs/                      # 📄 Documentation complète
 │   ├── data_model/
 │   │   ├── logical_data_model.png       # Diagramme ERD
 │   │   └── logical_data_model.drawio    # Source éditable
-│   ├── analysis_exploratoire/
-│   │   └── EDA_sales.ipynb              # ⭐ Notebook Jupyter
+│   │
+│   │── analysis_exploratoire.ipynb              # ⭐ Notebook Jupyter
 │   └── data_modeling.md                 # ⭐ Raisonnement de modélisation
 │
 ├── 📂 ingestion/                 # 🐍 Module Python ETL

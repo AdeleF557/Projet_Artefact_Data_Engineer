@@ -1,12 +1,11 @@
-# Environnements virtuels Python
-venv/
-env/
-.venv/
-ENV/
-env.bak/
-venv.bak/
+# Fichiers sensibles
+.env
+*.pem
+*.key
+secrets/
 
-# Cache Python
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,11 +23,36 @@ parts/
 sdist/
 var/
 wheels/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Environnements virtuels
+venv/
+ENV/
+env/
+.venv
+
+
+# Jupyter Notebook
+
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+
+# Airflow
+airflow/logs/
+airflow/__pycache__/
+airflow.db
+airflow.cfg
+unittests.cfg
+webserver_config.py
+
+
+# Docker
+*.log
+
 
 # IDE
 .vscode/
@@ -36,30 +60,20 @@ MANIFEST
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 
-# Docker
-*.log
+# Données 
+data/source/*.csv
+!data/source/.gitkeep
+
+
+# Tests
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
 
-# Data files (optionnel - à adapter)
-*.csv
-*.parquet
-*.json
-*.db
-*.sqlite
-*.pickle
 
-# Airflow
-airflow/logs/
-airflow/plugins/__pycache__/
+# Divers
+*.bak
+*.tmp

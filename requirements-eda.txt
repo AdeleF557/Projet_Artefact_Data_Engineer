@@ -1,5 +1,18 @@
-jupyter
-seaborn
-matplotlib
-pandas
-numpy
+# Core Analysis
+pandas==2.1.4
+numpy==1.26.2
+
+# Visualization
+matplotlib==3.8.2
+seaborn==0.13.0
+plotly==5.18.0
+
+# Jupyter
+jupyter==1.0.0
+ipykernel==6.27.1
+ipywidgets==8.1.1
+
+# Data Profiling
+pandas-profiling==3.6.6
+ydata-profiling==4.6.3
+

@@ -2,7 +2,7 @@ set -e
 
 echo " Initialisation de la base de données ecommerce."
 
-# Exécution dans l'ordre 
+# Exécution de mes scripts sql dans l'ordre 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     \echo 'Création du schéma.'
     \i /sql/01_schema.sql

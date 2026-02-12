@@ -1,30 +1,33 @@
-# ENV COMMUNES AIRFLOW
+# Variables d'environnement communes à tous les services Airflow
 x-airflow-common-env: &airflow-common-env
   AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: "True" 
+  AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 30  
   AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:-airflow123}@airflow-db:5432/airflow
   AIRFLOW__CORE__LOAD_EXAMPLES: "false"
   AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
 
-  # Connexions Airflow
-  AIRFLOW_CONN_POSTGRES_ECOMMERCE: postgresql://${POSTGRES_USER:-ecommerce_user}:${POSTGRES_PASSWORD:-ecommerce123}@postgres:5432/${POSTGRES_DB:-ecommerce}
+  # Connexions Airflow 
+  AIRFLOW_CONN_POSTGRES_ECOMMERCE: postgresql://${POSTGRES_USER:-ecommerce_user}:${POSTGRES_PASSWORD:-ecommerce123}@postgres_ecommerce:5432/${POSTGRES_DB:-ecommerce}
   AIRFLOW_CONN_MINIO_S3: aws://${MINIO_ROOT_USER:-minioadmin}:${MINIO_ROOT_PASSWORD:-minioadmin123}@?endpoint_url=http://minio:9000&region_name=us-east-1
 
   # Variables Airflow
   AIRFLOW_VAR_MINIO_BUCKET: folder-source
   AIRFLOW_VAR_SOURCE_FILE: sales.csv
 
-  # AUTO-CRÉATION UTILISATEUR 
+  # Auto-création utilisateur admin
   AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
   _AIRFLOW_WWW_USER_CREATE: 'true'
   _AIRFLOW_WWW_USER_USERNAME: admin
   _AIRFLOW_WWW_USER_PASSWORD: admin123
   _AIRFLOW_WWW_USER_FIRSTNAME: Adele
   _AIRFLOW_WWW_USER_LASTNAME: Coulibaly
-  _AIRFLOW_WWW_USER_EMAIL: adele@artefact.ci
+  _AIRFLOW_WWW_USER_EMAIL: adelecoulibaly18@gmail.com
   _AIRFLOW_WWW_USER_ROLE: Admin
 
 services:
 
+ 
   postgres:
     image: postgres:15-alpine
     container_name: postgres_ecommerce
@@ -34,7 +37,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-ecommerce_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecommerce123}
     ports:
-      - "5434:5432"
+      - "5434:5432" 
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/01-init.sh
@@ -55,19 +58,19 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9000:9000"  
+      - "9001:9001"  
     volumes:
       - minio_data:/data
-      - minio_mc_config:/root/.mc
     healthcheck:
-      test: ["CMD-SHELL", "timeout 5 bash -c '</dev/tcp/127.0.0.1/9000' || exit 1"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
       - backend
 
+  
   minio_init:
     image: minio/mc:latest
     depends_on:
@@ -77,12 +80,12 @@ services:
       /bin/sh -c "
       sleep 5;
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin123};
-      mc mb -p local/folder-source;
-      mc cp /tmp/sales.csv local/folder-source/sales.csv;
+      mc mb -p local/folder-source || true;
+      mc cp /tmp/sales.csv local/folder-source/sales.csv || true;
+      echo 'MinIO initialisé avec succès';
       "
     volumes:
       - ./data/source/sales.csv:/tmp/sales.csv:ro
-      - minio_mc_config:/root/.mc
     restart: "no"
     networks:
       - backend
@@ -105,21 +108,27 @@ services:
     networks:
       - airflow
 
+  
   airflow-init:
     build:
-      context: ./docker
-      dockerfile: Dockerfile.airflow
+      context: .
+      dockerfile: docker/Dockerfile
     container_name: airflow_init
     depends_on:
       airflow-db:
         condition: service_healthy
     environment:
       <<: *airflow-common-env
+      PYTHONPATH: /opt/airflow/ingestion
+      POSTGRES_USER: ecommerce_user
+      POSTGRES_PASSWORD: ecommerce123 
+      POSTGRES_DB: ecommerce
     command: >
       bash -c "
-      echo 'Initialisation Airflow...';
+      echo ' Initialisation Airflow.';
+      sleep 10;
       airflow db migrate;
-      echo 'Base migrée';
+      echo 'Base Airflow migrée avec succès';
       "
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -133,24 +142,30 @@ services:
 
   airflow-webserver:
     build:
-      context: ./docker
-      dockerfile: Dockerfile.airflow
-    container_name: airflow_webserver
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: api-server
     depends_on:
       airflow-init:
         condition: service_completed_successfully
     environment:
       <<: *airflow-common-env
+      PYTHONPATH: /opt/airflow/ingestion
+      POSTGRES_USER: ecommerce_user
+      POSTGRES_PASSWORD: ecommerce123 
+      POSTGRES_DB: ecommerce
     ports:
       - "8081:8080"
-    command: api-server
+    command: airflow api-server 
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
       - ./ingestion:/opt/airflow/ingestion
+      - ./tests:/opt/airflow/tests  
+
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/ || exit 1"]
+      test: ["CMD", "sh", "-c", "nc -z localhost 8080 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -160,29 +175,39 @@ services:
 
   airflow-scheduler:
     build:
-      context: ./docker
-      dockerfile: Dockerfile.airflow
+      context: .
+      dockerfile: docker/Dockerfile
     container_name: airflow_scheduler
     depends_on:
       airflow-webserver:
         condition: service_healthy
     environment:
       <<: *airflow-common-env
+      PYTHONPATH: /opt/airflow:/opt/airflow/ingestion  
+      POSTGRES_USER: ecommerce_user
+      POSTGRES_PASSWORD: ecommerce123 
+      POSTGRES_DB: ecommerce
+
     command: airflow scheduler
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
       - ./ingestion:/opt/airflow/ingestion
+      - ./tests:/opt/airflow/tests  
+
     networks:
       - airflow
       - backend
 
+
 volumes:
   postgres_data:
+    driver: local
   minio_data:
+    driver: local
   airflow_db_data:
-  minio_mc_config:
+    driver: local
 
 networks:
   backend:

@@ -1,835 +1,874 @@
-# 🛒 Challenge Data Engineer E-Commerce - Artefact CI
+# Projet E-Commerce Data Pipeline
 
-> Pipeline d'ingestion et modélisation de données de ventes e-commerce avec orchestration Airflow
-
-[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
-[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://www.docker.com/)
-[![Airflow](https://img.shields.io/badge/Airflow-3.x-red.svg)](https://airflow.apache.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791.svg)](https://www.postgresql.org/)
+**Challenge Data Engineer - Artefact CI**  
+**Candidat** : Adele Coulibaly  
+**Date** : Février 2026
 
 ---
 
-## 📋 Table des matières
+## Table des matières
 
-- [Contexte du projet](#-contexte-du-projet)
-- [Architecture technique](#-architecture-technique)
-- [Modélisation des données](#-modélisation-des-données)
-- [Installation et démarrage](#-installation-et-démarrage)
-- [Utilisation](#-utilisation)
-- [Tests](#-tests)
-- [Choix techniques et justifications](#-choix-techniques-et-justifications)
-- [Structure du projet](#-structure-du-projet)
-- [Documentation](#-documentation)
-
----
-
-## ⚡ Quick Start (5 minutes)
-**Pour évaluer le projet sans lire toutes les pages** :
-1. `docker-compose up -d` → Démarrer l'infrastructure
-2. http://localhost:8081 → Activer le DAG `ingestion_ventes_quotidien`
-3. Trigger manuel → Observer l'exécution dans l'UI Airflow
-4. `docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce`
-5. `SELECT * FROM vw_sales_star LIMIT 10;` → Vérifier les données
-
-**Résultat attendu** : Pipeline complet en 2-3 minutes avec données dans PostgreSQL ✅
-
-
-## 🎯 Contexte du projet
-
-Ce projet s'inscrit dans le cadre du **challenge technique Artefact CI** pour le poste de **Stagiaire Data Engineer**. Il vise à démontrer mes compétences en ingénierie de données sur l'ensemble de la chaîne de valeur : de l'analyse exploratoire à l'orchestration de pipelines en production.
-
-### Objectifs du challenge
-
-✅ **Analyser** un jeu de données réel de ventes e-commerce  
-✅ **Modéliser** en 3ème Forme Normale (3FN) puis Domain-Key Normal Form (DKNF)  
-✅ **Implémenter** le modèle dans PostgreSQL avec contraintes et index  
-✅ **Déployer** l'infrastructure complète via Docker Compose  
-✅ **Développer** un script d'ingestion Python robuste et idempotent  
-✅ **Orchestrer** le pipeline avec Apache Airflow 3.x  
-
-### Périmètre fonctionnel
-
-**Source de données** : `sales.csv` (ventes e-commerce)  
-**Période d'ingestion** : Données filtrées par date (`sale_date`)  
-**Stockage** : MinIO (S3-compatible) → PostgreSQL (OLTP & OLAP)  
-**Fréquence** : Ingestion quotidienne orchestrée par Airflow  
+1. [Contexte du projet](#contexte-du-projet)
+2. [Objectifs et compétences démontrées](#objectifs-et-compétences-démontrées)
+3. [Architecture technique](#architecture-technique)
+4. [Prérequis système](#prérequis-système)
+5. [Installation](#installation)
+6. [Démarrage du projet](#démarrage-du-projet)
+7. [Utilisation](#utilisation)
+8. [Vérification des données](#vérification-des-données)
+9. [Tests automatisés](#tests-automatisés)
+10. [Documentation complémentaire](#documentation-complémentaire)
+11. [Résolution des problèmes](#résolution-des-problèmes)
+12. [Structure du projet](#structure-du-projet)
+13. [Commandes de référence rapide](#commandes-de-référence-rapide)
+14. [Contact](#contact)
 
 ---
 
-## 🏗️ Architecture technique
+## Contexte du projet
 
-### Stack technologique complète
+Ce projet a été réalisé dans le cadre du processus de recrutement pour un poste de Data Engineer chez Artefact.
 
-| Composant | Technologie | Version | Rôle |
-|-----------|-------------|---------|------|
-| **Orchestration** | Apache Airflow | 3.x | Planification et monitoring des pipelines |
-| **Base OLTP/OLAP** | PostgreSQL | 15-alpine | Stockage normalisé (DKNF) + vues analytiques |
-| **Object Storage** | MinIO | latest | Stockage des fichiers sources (API S3) |
-| **Conteneurisation** | Docker Compose | v2 | Déploiement multi-services |
-| **ETL** | Python | 3.12 | Logique d'ingestion avec logging |
-| **Tests** | Pytest | 7.4+ | Validation unitaire et d'intégration |
+### Problématique métier
 
-### Diagramme d'architecture
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    COUCHE STOCKAGE                           │
-│  ┌────────────────┐                 ┌──────────────────┐    │
-│  │     MinIO      │                 │   PostgreSQL     │    │
-│  │  (S3-like)     │                 │                  │    │
-│  │                │                 │  ┌────────────┐  │    │
-│  │ 📁 Bucket:     │                 │  │ DKNF Tables│  │    │
-│  │ folder-source  │                 │  │  (OLTP)    │  │    │
-│  │                │                 │  └────────────┘  │    │
-│  │ 📄 sales.csv   │                 │  ┌────────────┐  │    │
-│  │                │                 │  │ Star Views │  │    │
-│  └────────┬───────┘                 │  │  (OLAP)    │  │    │
-│           │                         │  └────────────┘  │    │
-└───────────┼─────────────────────────┴──────────────────┘    │
-            │                                  ▲               │
-            │                                  │               │
-┌───────────▼──────────────────────────────────┴──────────┐   │
-│              COUCHE ORCHESTRATION (Airflow 3.x)         │   │
-│  ┌──────────────────────────────────────────────────┐   │   │
-│  │  DAG: ingestion_ventes_quotidien                 │   │   │
-│  │  • Schedule: 0 2 * * * (Quotidien à 2h00 UTC)   │   │   │
-│  │  • Connexions: AIRFLOW_CONN_POSTGRES_ECOMMERCE   │   │   │
-│  │               AIRFLOW_CONN_MINIO_S3              │   │   │
-│  │  • Variables: AIRFLOW_VAR_MINIO_BUCKET          │   │   │
-│  └──────────────────┬───────────────────────────────┘   │   │
-│                     │                                    │   │
-│  ┌──────────────────▼───────────────────────────────┐   │   │
-│  │         TaskFlow API (@task decorator)           │   │   │
-│  └──────────────────┬───────────────────────────────┘   │   │
-└─────────────────────┼──────────────────────────────────┘   │
-                      │                                       │
-┌─────────────────────▼──────────────────────────────────┐   │
-│              COUCHE TRAITEMENT (Python)                │   │
-│  ┌──────────────────────────────────────────────────┐  │   │
-│  │  Module: ingestion/                              │  │   │
-│  │  ┌──────────────┐  ┌──────────────┐             │  │   │
-│  │  │  Extraction  │→ │  Validation  │             │  │   │
-│  │  │  (MinIO)     │  │  (Format)    │             │  │   │
-│  │  └──────────────┘  └──────┬───────┘             │  │   │
-│  │                            ▼                      │  │   │
-│  │  ┌──────────────┐  ┌──────────────┐             │  │   │
-│  │  │  Transform   │→ │     Load     │             │  │   │
-│  │  │  (Pandas)    │  │ (PostgreSQL) │             │  │   │
-│  │  └──────────────┘  └──────────────┘             │  │   │
-│  │                                                   │  │   │
-│  │  Features:                                        │  │   │
-│  │  • Idempotence (upsert sur clés primaires)      │  │   │
-│  │  • Logging détaillé (INFO/ERROR)                │  │   │
-│  │  • Gestion d'erreurs (try/except)               │  │   │
-│  └──────────────────────────────────────────────────┘  │   │
-└─────────────────────────────────────────────────────────┘
-```
+Une entreprise e-commerce génère quotidiennement des données de ventes stockées dans un fichier CSV. Ces données doivent être :
+
+- Ingérées automatiquement chaque jour
+- Nettoyées et normalisées selon les standards de qualité
+- Stockées dans une base de données relationnelle performante
+- Analysables via des vues analytiques (star schema)
+
+### Données en entrée
+
+- **Fichier** : `sales.csv` 
+- **Contenu** : Ventes quotidiennes d'un site e-commerce
+- **Champs clés** : client, produit, canal de vente, campagne marketing, montants, dates
+- **Volume** : Plusieurs milliers de lignes
+- **Exemple de date disponible** : 2025-04-14
 
 ---
 
-## 📊 Modélisation des données
+## Objectifs et compétences démontrées
 
-### Démarche de normalisation
-
-Le projet implémente **deux niveaux de normalisation complémentaires** conformément aux exigences du challenge. Le raisonnement complet est documenté dans [`docs/data_modeling.md`](docs/data_modeling.md).
-
----
-
-## 4. Modèle Conceptuel des Données (MCD)
-
-Le Modèle Conceptuel des Données (MCD) représente une **photographie brute des entités identifiées** lors de l'analyse exploratoire, **avant toute application des règles de normalisation**.
-
-À ce stade :
-- ✅ Toutes les entités métier sont identifiées par regroupement logique
-- ✅ Tous les attributs du fichier source sont conservés (y compris ceux qui seront éliminés en 3FN)
-- ✅ Les relations entre entités sont établies selon les dépendances fonctionnelles observées
-- ❌ Aucune règle de normalisation (1FN, 2FN, 3FN) n'est encore appliquée
-
-### 4.1 Entités identifiées (pré-normalisation)
-
-| Entité | Clé primaire | Rôle métier | Justification |
-|--------|-------------|-------------|---------------|
-| `customers` | `customer_id` | Référentiel clients | Attributs stables, indépendants des transactions |
-| `products` | `product_id` | Catalogue produits | Caractéristiques produit hors contexte de vente |
-| `channels` | `channel_id` | Canaux de distribution | Valeurs catégorielles répétées (Online, Store...) |
-| `campaigns` | `campaign_id` | Campagnes marketing | Entité optionnelle, partagée par plusieurs ventes |
-| `sales` | `sale_id` | Transactions globales | Regroupe métadonnées de vente (date, client, canal, **total_amount**) |
-| `sale_items` | `item_id` | Lignes de vente | **Granularité transactionnelle** (produit + quantité + **item_total**) |
-
-**⚠️ Note importante** : Les attributs `total_amount`, `item_total`, `discount_applied`, etc. sont **conservés dans le MCD** car ils reflètent fidèlement le fichier source. Ils seront **éliminés lors de la normalisation 3FN** (voir section suivante).
-
-### 4.2 Diagramme conceptuel (pré-normalisation)
-
-![Diagramme conceptuel des données](./docs/data_model/logical_data_model.png)
-
-**Légende** :
-- 🟦 **Bleu** : Entités transactionnelles (`sales`, `sale_items`)
-- 🟩 **Vert** : Référentiels métier (`customers`, `products`, `channels`, `campaigns`)
-
-### 4.3 Cardinalités observées
-
-- **customers (1,1) ↔ sales (0,N)** : Un client peut effectuer plusieurs ventes
-- **sales (1,1) ↔ sale_items (1,N)** : Une vente contient au moins une ligne
-- **products (1,1) ↔ sale_items (0,N)** : Un produit peut être vendu 0 à N fois
-- **channels (1,1) ↔ sales (1,N)** : Chaque vente a un seul canal
-- **campaigns (0,1) ↔ sales (0,N)** : Une vente peut être liée ou non à une campagne
+| Compétence | Réalisation |
+|------------|-------------|
+| **Analyse de données métier** | Exploration et compréhension du jeu de données<br>Identification des entités métier<br>Détection des anomalies et redondances |
+| **Modélisation relationnelle** | Normalisation jusqu'à la DKNF<br>Identification des clés primaires/étrangères<br>Création d'un schéma en étoile<br>Justification argumentée |
+| **Implémentation SQL (PostgreSQL)** | Scripts de création de tables<br>Contraintes d'intégrité (CHECK, FOREIGN KEY)<br>Index optimisés<br>Vues analytiques (star schema) |
+| **Conteneurisation Docker** | Déploiement PostgreSQL via Docker Compose<br>Déploiement MinIO (stockage S3-compatible)<br>Configuration réseau et volumes persistants<br>Initialisation automatique des tables |
+| **Développement Python** | Script d'ingestion robuste et maintenable<br>Gestion des erreurs<br>Idempotence garantie<br>Logging structuré |
+| **Orchestration Airflow** | Déploiement Airflow 3.x via Docker<br>DAG automatisé pour ingestion quotidienne<br>Utilisation Connections/Variables Airflow<br>Monitoring et gestion des échecs |
+| **Tests et qualité** | Tests unitaires (pytest)<br>Tests d'intégration<br>Documentation claire et complète |
 
 ---
 
-### 5. Normalisation en Troisième Forme Normale (3FN)
+## Architecture technique
 
-#### 5.1 Objectif de la 3FN
+### Stack technologique
 
-**Transition depuis le MCD** : À partir du modèle conceptuel brut identifié précédemment, la normalisation 3FN vise à :
+| Composant | Technologie | Version | Port | Description |
+|-----------|-------------|---------|------|-------------|
+| Base de données | PostgreSQL | 15-alpine | 5434 | Stockage des données normalisées |
+| Stockage objet | MinIO | Latest | 9000 (API)<br>9001 (Console) | Stockage S3-compatible du fichier source |
+| Orchestration | Apache Airflow | 3.0.0 | 8081 | Planification et exécution du pipeline |
+| Langage | Python | 3.11+ | - | Scripts d'ingestion |
+| Conteneurisation | Docker Compose | v2+ | - | Orchestration de tous les services |
 
-- ✅ Éliminer les attributs **dérivés ou calculables**
-- ✅ Supprimer les **redondances**
-- ✅ Garantir que chaque attribut non-clé dépend **uniquement** de la clé primaire
-- ✅ Éliminer toutes les **dépendances transitives**
+### Fonctionnalités du pipeline
 
-#### 5.2 Attributs éliminés (dérivés ou redondants)
+Pipeline de données automatisé qui :
 
-| Attribut | Raison de l'élimination | Calcul alternatif |
-|----------|-------------------------|-------------------|
-| `item_total` | Dérivé | `quantity × unit_price × (1 - discount_percent/100)` |
-| `total_amount` | Dérivé | `SUM(item_total)` par `sale_id` |
-| `discount_applied` | Redondant | Dérivable de `discount_percent` |
-| `original_price` | Redondant | Existe déjà dans `products.catalog_price` |
-
-**Justification** : Stocker ces valeurs introduirait des **risques d'incohérence** 
-lors des mises à jour (ex : modification de `quantity` sans recalcul de `item_total`).
-
-#### 5.3 Schéma relationnel 3FN final
-
-**Tables résultantes (3FN)** :
-- `customers` : Informations clients
-- `products` : Catalogue produits
-- `channels` : Canaux de vente
-- `campaigns` : Campagnes marketing
-- `sales` : Transactions globales (sans `total_amount`)
-- `sale_items` : Lignes de vente (sans `item_total`)
-
-#### 5.4 Bilan 3FN
-
-✅ **Pas de redondance** : Chaque information stockée une seule fois  
-✅ **Pas de dépendances transitives** : Attributs dépendent uniquement des clés  
-✅ **Intégrité référentielle** : Garantie par les clés étrangères  
+1. Lit les ventes depuis MinIO (stockage S3)
+2. Filtre les données par date d'exécution
+3. Nettoie et normalise (age_range, discount_percent, etc.)
+4. Extrait les dimensions (channels, campaigns)
+5. Alimente PostgreSQL via UPSERT (idempotence garantie)
+6. Orchestre tout via Airflow avec monitoring
 
 ---
 
-### 6. Normalisation DKNF (Domain-Key Normal Form)
+## Prérequis système
 
-**Objectif** : Garantir que **toutes les contraintes sont exprimées via des domaines et des clés**
+**Durée d'installation** : 15 minutes environ
 
-**Contraintes implémentées** :
-```sql
--- Contraintes de domaine (CHECK)
-ALTER TABLE products
-  ADD CONSTRAINT chk_price_positive CHECK (catalog_price > 0);
+### 1. Docker Desktop
 
-ALTER TABLE sale_items
-  ADD CONSTRAINT chk_quantity_positive CHECK (quantity > 0),
-  ADD CONSTRAINT chk_discount_valid CHECK (discount_percent BETWEEN 0 AND 100);
+#### Windows
 
--- Contraintes de clés (PK + FK + UNIQUE)
-ALTER TABLE products
-  ADD PRIMARY KEY (product_id),
-  ADD UNIQUE (product_name);
+1. Télécharger : https://www.docker.com/products/docker-desktop
+2. Installer et redémarrer votre PC
+3. **IMPORTANT** : Ouvrir Docker Desktop et attendre qu'il soit démarré (icône verte)
 
-ALTER TABLE sale_items
-  ADD PRIMARY KEY (item_id),
-  ADD FOREIGN KEY (product_id) REFERENCES products(product_id),
-  ADD FOREIGN KEY (sale_id) REFERENCES sales(sale_id);
-```
+#### macOS
 
-**Justification DKNF pour ce projet** :
+1. Télécharger : https://www.docker.com/products/docker-desktop
+2. Installer et lancer Docker Desktop
+3. Attendre que l'icône de la baleine soit stable
 
-✅ **Intégrité maximale** : Impossible d'insérer des données invalides (prix négatif, quantité = 0)  
-✅ **Auto-documentation** : Les contraintes SQL documentent les règles métier  
-✅ **Performance** : Les index sur FK accélèrent les jointures  
-✅ **Maintenance** : Modification du schéma = modification des contraintes (cohérence garantie)  
+#### Linux
 
-**Pourquoi aller jusqu'à la DKNF dans ce cas ?**
-
-> Dans un contexte e-commerce avec **volumétrie importante** et **intégrité critique** (transactions financières), la DKNF permet de **déléguer la validation métier au SGBD** plutôt qu'au code applicatif. Cela évite les bugs silencieux (ex: vente avec quantité = -5) et garantit la cohérence même en cas d'accès multi-applications à la base.
-
----
-
-### 7. Modèle Analytique : Star Schema (OLAP)
-
-**Implémentation** : Vue SQL pour requêtes BI
-```sql
-CREATE OR REPLACE VIEW vw_sales_star AS
-SELECT 
-    si.item_id,
-    s.sale_date,
-    -- Dimension Produit
-    p.product_name,
-    p.category AS product_category,
-    p.catalog_price AS unit_price,
-    -- Dimension Client
-    c.first_name || ' ' || c.last_name AS customer_name,
-    c.country,
-    -- Métriques
-    si.quantity,
-    (si.quantity * si.unit_price) AS revenue
-FROM sale_items si
-JOIN sales s ON si.sale_id = s.sale_id
-JOIN products p ON si.product_id = p.product_id
-JOIN customers c ON s.customer_id = c.customer_id;
-```
-
-### Diagramme du modèle logique
-
-**Documentation complète avec raisonnement** : [`docs/data_modeling.md`](docs/data_modeling.md)
-
-### Scripts SQL (conformes PostgreSQL)
-
-| Script | Description | Création automatique |
-|--------|-------------|----------------------|
-| `01_schema.sql` | Création du schéma `ecommerce` | ✅ Oui (init-db.sh) |
-| `02_tables_dknf.sql` | Tables normalisées DKNF avec PK | ✅ Oui (init-db.sh) |
-| `03_views_star_schema.sql` | Vue analytique Star Schema | ✅ Oui (init-db.sh) |
-| `04_constraints_indexes.sql` | Contraintes FK, CHECK, index | ✅ Oui (init-db.sh) |
-
-**Mécanisme d'initialisation** :
 ```bash
-# Extrait de scripts/init-db.sh
-#!/bin/bash
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-    \i /sql/01_schema.sql
-    \i /sql/02_tables_dknf.sql
-    \i /sql/03_views_star_schema.sql
-    \i /sql/04_constraints_indexes.sql
-EOSQL
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker $USER
+# Déconnexion/reconnexion requise pour appliquer les permissions
+```
+
+### 2. Vérification de l'installation
+
+**Ouvrir un terminal** :
+- Windows : PowerShell (pas l'invite de commande)
+- macOS/Linux : Terminal
+
+Exécuter les commandes suivantes :
+
+```bash
+docker --version
+```
+
+Résultat attendu : `Docker version 24.x.x` ou supérieur
+
+```bash
+docker compose version
+```
+
+Résultat attendu : `Docker Compose version v2.x.x` ou supérieur
+
+Si ces commandes ne fonctionnent pas, Docker n'est pas correctement installé ou démarré.
+
+---
+
+## Installation
+
+**Durée** : 10 minutes environ
+
+### Étape 1 : Télécharger le projet
+
+#### Windows (PowerShell)
+
+```powershell
+# Aller dans vos Documents
+cd C:\Users\VotreNom\Documents
+
+# Cloner le projet
+git clone https://github.com/votre-repo/ecommerce-pipeline.git
+
+# Entrer dans le dossier
+cd ecommerce-pipeline
+```
+
+#### macOS/Linux (Terminal)
+
+```bash
+# Aller dans votre dossier home
+cd ~
+
+# Cloner le projet
+git clone https://github.com/votre-repo/ecommerce-pipeline.git
+
+# Entrer dans le dossier
+cd ecommerce-pipeline
+```
+
+### Étape 2 : Placer le fichier de données
+
+**CRITIQUE** : Le fichier `sales.csv` doit être placé dans le bon dossier.
+
+**Emplacement requis** :
+```
+ecommerce-pipeline/
+└── data/
+    └── source/
+        └── sales.csv  ← PLACER LE FICHIER ICI
+```
+
+**Vérification du placement** :
+
+Windows :
+```powershell
+dir data\source\sales.csv
+```
+
+macOS/Linux :
+```bash
+ls -lh data/source/sales.csv
+```
+
+Résultat attendu : Le fichier doit être affiché avec sa taille.
+
+Si le fichier n'est pas trouvé, vérifier que vous êtes bien dans le dossier `ecommerce-pipeline` et que le fichier CSV a été copié au bon endroit.
+
+---
+
+## Démarrage du projet
+
+**Durée** : 3-5 minutes
+
+### IMPORTANT : Vérification préalable
+
+**Avant de continuer**, vérifier que Docker Desktop est lancé et fonctionne.
+
+### Démarrer tous les services
+
+**Depuis le dossier `ecommerce-pipeline`** (là où se trouve le fichier `docker-compose.yml`) :
+
+```bash
+docker compose up -d --build
+```
+
+**Explication de la commande** :
+- `docker compose` : Utilise Docker Compose
+- `up` : Démarre les services
+- `-d` : Mode détaché (en arrière-plan)
+- `--build` : Reconstruit les images si nécessaire
+
+**Attendre 2-3 minutes** que tous les services démarrent. Vous verrez des messages de création et démarrage de conteneurs.
+
+### Vérifier que tous les services fonctionnent
+
+**Toujours depuis le dossier `ecommerce-pipeline`** :
+
+```bash
+docker compose ps
+```
+
+**Résultat attendu** : Tous les services doivent afficher `running` ou `healthy` dans la colonne STATUS
+
+```
+NAME                   STATUS
+postgres_ecommerce     Up (healthy)
+minio                  Up (healthy)
+minio_init             Exited (0)
+airflow_db             Up (healthy)
+airflow_init           Exited (0)
+api-server             Up (healthy)
+airflow_scheduler      Up
+```
+
+**Services qui doivent être "Up"** :
+- postgres_ecommerce : Base de données principale
+- minio : Stockage des fichiers source
+- airflow_db : Base de données Airflow
+- api-server : Interface web Airflow
+- airflow_scheduler : Planificateur de tâches
+
+**Services qui peuvent être "Exited (0)"** :
+- minio_init : Service d'initialisation de MinIO (s'arrête après configuration)
+- airflow_init : Service d'initialisation d'Airflow (s'arrête après migration)
+
+### Si un service est "unhealthy"
+
+```bash
+# Voir les logs du service problématique
+docker compose logs nom_du_service
+
+# Exemple pour le webserver
+docker compose logs api-server
 ```
 
 ---
 
-## 🚀 Installation et démarrage
+## Utilisation
 
-### Prérequis système
+### Accès aux interfaces web
 
-- **Docker** ≥ 20.10 et **Docker Compose** ≥ 2.0
-- **Python** ≥ 3.12 (pour test local optionnel)
-- **Git**
-- **8 GB RAM** recommandés (Airflow + PostgreSQL + MinIO)
+Une fois tous les services démarrés, vous pouvez accéder aux différentes interfaces :
 
-### Démarrage complet (recommandé)
+#### 1. Interface Airflow
 
-**Temps estimé** : ~3 minutes
-```bash
-# 1. Cloner le repository
-git clone <URL_DU_REPO>
-cd Projet_artefact
+- **URL** : http://localhost:8081
+- **Identifiants** :
+  - Username : `admin`
+  - Password : `admin123`
+- **Description** : Interface de gestion et monitoring du pipeline de données
 
-# 2. Vérifier la présence du fichier source
-ls -l data/source/sales.csv
+#### 2. Console MinIO
 
-# 3. Construction de l'image Docker Airflow personnalisée
-docker build -t projet_artefact_airflow:latest -f docker/Dockerfile .
+- **URL** : http://localhost:9001
+- **Identifiants** :
+  - Username : `minioadmin`
+  - Password : `minioadmin123`
+- **Description** : Interface de gestion du stockage de fichiers
+- **Vérification** : Bucket `folder-source` contenant le fichier `sales.csv`
 
-# 4. Démarrer tous les services
-docker-compose up -d
+#### 3. PostgreSQL (via ligne de commande)
 
-# 5. Vérifier la santé des conteneurs
-docker-compose ps
-
-# Expected output:
-# ✅ postgres_ecommerce  (healthy)
-# ✅ minio               (healthy)
-# ✅ airflow_db          (healthy)
-# ✅ airflow_webserver   (healthy)
-# ✅ airflow_scheduler   (Up)
-```
-
-### Vérification de l'initialisation
-```bash
-# 1. Vérifier que les tables DKNF ont été créées
-docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce -c "\dt"
-
-# Expected output:
-#  Schema   |      Name       | Type  |     Owner
-# ----------+-----------------+-------+----------------
-#  public   | customers       | table | ecommerce_user
-#  public   | products        | table | ecommerce_user
-#  public   | channels        | table | ecommerce_user
-#  public   | campaigns       | table | ecommerce_user
-#  public   | sales           | table | ecommerce_user
-#  public   | sale_items      | table | ecommerce_user
-
-# 2. Vérifier la vue Star Schema
-docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce -c "\dv"
-
-# Expected output:
-#  Schema   |      Name       | Type |     Owner
-# ----------+-----------------+------+----------------
-#  public   | vw_sales_star   | view | ecommerce_user
-
-# 3. Vérifier l'upload du fichier dans MinIO
-docker exec -it minio mc ls local/folder-source/
-
-# Expected output:
-# [2026-02-09 20:00:00 UTC] 1.2MiB sales.csv
-```
-
-### Services disponibles
-
-| Service | URL | Identifiants |
-|---------|-----|--------------|
-| 🌐 **Airflow UI** | http://localhost:8081 | `admin` / `admin123` |
-| 📦 **MinIO Console** | http://localhost:9001 | `minioadmin` / `minioadmin123` |
-| 🗄️ **PostgreSQL** | `localhost:5434` | `ecommerce_user` / `ecommerce123` |
-
----
-
-## 📖 Utilisation
-
-### Option 1 : Exécution via Airflow (Production)
-
-#### 1. Activer le DAG
-```bash
-# Via CLI
-docker exec -it airflow_webserver airflow dags unpause ingestion_ventes_quotidien
-
-# Ou via l'interface web : http://localhost:8081
-# → Toggle ON sur le DAG
-```
-
-#### 2. Déclencher une exécution manuelle
-```bash
-# Ingérer les données du 15 juin 2025
-docker exec -it airflow_webserver airflow dags trigger ingestion_ventes_quotidien
-```
-
-#### 3. Monitoring
-
-- **Interface Airflow** : http://localhost:8081/dags/ingestion_ventes_quotidien/grid
-- **Logs en temps réel** :
-```bash
-  docker logs airflow_scheduler -f
-```
-
-#### 4. Vérifier les résultats
 ```bash
 docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce
+```
 
-# Dans PostgreSQL
+Une fois connecté, vous pouvez exécuter des commandes SQL :
+
+```sql
+-- Lister les tables
+\dt ecommerce.*
+
+-- Voir la structure d'une table
+\d ecommerce.customers
+
+-- Quitter
+\q
+```
+
+---
+
+### Méthodes d'exécution de l'ingestion
+
+Il existe trois méthodes pour lancer l'ingestion de données.
+
+#### Méthode 1 : Via l'interface Airflow (Recommandé pour les débutants)
+
+1. Ouvrir http://localhost:8081 dans votre navigateur
+2. Se connecter avec `admin` / `admin123`
+3. Trouver le DAG `ingestion_ventes_quotidien` dans la liste
+4. Activer le DAG en cliquant sur le toggle 
+5. Cliquer sur le bouton "Trigger DAG" (icône "play" à droite)
+6. Le DAG va s'exécuter avec la date du jour
+7. Suivre l'exécution dans l'onglet "Graph" ou "Grid"
+8. Cliquer sur une tâche puis "Log" pour voir les détails
+
+**Note** : Le DAG s'exécutera automatiquement tous les jours à 2h du matin une fois activé.
+
+#### Méthode 2 : Script Python manuel avec date spécifique
+
+Cette méthode permet de lancer l'ingestion pour une date précise.
+
+**Depuis le dossier racine du projet `ecommerce-pipeline`** :
+
+```bash
+# Format de date : YYYYMMDD
+# Exemple avec une date qui contient des données
+docker exec -it airflow_scheduler python /opt/airflow/ingestion/main.py 20250414
+```
+
+**Remplacer `20250414` par la date souhaitée** au format AAAAMMJJ (sans tirets ni espaces).
+
+**Exemple avec d'autres dates** :
+```bash
+# Pour le 16 juin 2025
+docker exec -it airflow_scheduler python /opt/airflow/ingestion/main.py 20250616
+
+# Pour le 12 février 2025
+docker exec -it airflow_scheduler python /opt/airflow/ingestion/main.py 20250212
+```
+
+**Résultat attendu** :
+```
+[INFO] Début ingestion pour 20250414
+[INFO] 1234 ventes chargées depuis MinIO pour 20250414
+[INFO] 500 lignes upsertées dans ecommerce.customers
+[INFO] 300 lignes upsertées dans ecommerce.products
+[INFO] 1234 lignes upsertées dans ecommerce.sales
+[INFO] Ingestion terminée avec succès pour 20250414
+```
+
+Si vous voyez `0 ventes chargées`, cela signifie qu'il n'y a pas de données pour cette date dans le fichier CSV.
+
+#### Méthode 3 : Test du DAG avec Airflow en ligne de commande
+
+Cette méthode permet de tester le DAG sans enregistrer l'exécution dans l'historique Airflow.
+
+**Depuis le dossier racine du projet** :
+
+```bash
+# Format de date : YYYY-MM-DD (avec tirets)
+docker exec -it airflow_scheduler airflow dags test ingestion_ventes_quotidien 2025-04-14
+```
+
+**Avantages** :
+- Exécution complète du DAG (validation + vérification fichier + ingestion)
+- Logs détaillés dans la console
+- Ne pollue pas l'historique Airflow
+- Idéal pour les tests et le développement
+
+**Résultat attendu** :
+```
+[INFO] Date validée: 20250414
+[INFO] Fichier sales.csv trouvé dans bucket folder-source
+[INFO] Début ingestion pour 20250414
+[INFO] 1234 ventes chargées depuis MinIO pour 20250414
+[INFO] Ingestion terminée avec succès pour 20250414
+[INFO] Marking run successful
+```
+
+
+## Vérification des données
+
+### Vérifier que l'ingestion a fonctionné
+
+#### 1. Via PostgreSQL (Ligne de commande)
+
+**Se connecter à PostgreSQL** :
+
+```bash
+docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce
+```
+
+**Exécuter des requêtes de vérification** :
+
+```sql
+-- Compter le nombre de ventes ingérées
+SELECT COUNT(*) FROM ecommerce.sales;
+
+-- Voir les 5 dernières ventes
+SELECT sale_id, sale_date, customer_id 
+FROM ecommerce.sales 
+ORDER BY sale_date DESC 
+LIMIT 5;
+
+-- Compter le nombre de clients
+SELECT COUNT(*) FROM ecommerce.customers;
+
+-- Compter le nombre de produits
+SELECT COUNT(*) FROM ecommerce.products;
+
+-- Statistiques par date
+SELECT 
+    sale_date,
+    COUNT(*) as nombre_ventes
+FROM ecommerce.sales
+GROUP BY sale_date
+ORDER BY sale_date DESC
+LIMIT 10;
+
+-- Tester la vue analytique (star schema)
 SELECT 
     sale_date,
     COUNT(*) as nb_ventes,
-    SUM(quantity) as total_quantity
-FROM sale_items si
-JOIN sales s ON si.sale_id = s.sale_id
-WHERE sale_date = '2025-06-15'
-GROUP BY sale_date;
+    SUM(net_amount) as revenue_total
+FROM ecommerce.fact_sales_star
+GROUP BY sale_date
+ORDER BY sale_date DESC
+LIMIT 10;
+
+-- Quitter PostgreSQL
+\q
 ```
 
-### Option 2 : Test rapide sans Airflow
+#### 2. Via l'interface Airflow
 
-**Cas d'usage** : Démo rapide pour le recruteur (2 minutes)
-```bash
-# 1. Démarrer uniquement PostgreSQL + MinIO
-docker-compose up -d postgres minio minio_init
+1. Aller sur http://localhost:8081
+2. Cliquer sur le DAG `ingestion_ventes_quotidien`
+3. Aller dans l'onglet "Grid" ou "Graph"
+4. Vérifier que l'exécution est marquée en vert (Success)
+5. Cliquer sur une tâche puis "Log" pour voir les détails d'exécution
 
-# 2. Créer l'environnement virtuel Python
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# 3. Installer les dépendances (choisir selon le besoin)
-
-## Option A : Installation minimale (pour run_ingestion.py uniquement)
-pip install pandas psycopg2-binary boto3 python-dotenv
-
-## Option B : Installation avec requirements-airflow.txt (inclut toutes les deps Airflow)
-pip install -r requirements-airflow.txt
-
-## Option C : Installation avec requirements-eda.txt (pour notebooks d'analyse)
-pip install -r requirements-eda.txt
-
-# 4. Lancer l'ingestion pour une date spécifique
-python run_ingestion.py
-
-# Le script ingestera les données du 15/06/2025 (DATE_TO_INGEST définie dans le script)
-```
-
-**📋 Fichiers requirements disponibles** :
-
-| Fichier | Contenu | Usage |
-|---------|---------|-------|
-| `requirements-airflow.txt` | Apache Airflow + providers + dépendances ETL | Pour l'image Docker Airflow |
-| `requirements-eda.txt` | Jupyter, matplotlib, seaborn, pandas, etc. | Pour l'analyse exploratoire (notebooks) |
-| *(aucun requirements.txt de base)* | Dépendances minimales inline | Installation manuelle pour test rapide |
-
-**💡 Recommandation** : Pour un test rapide, privilégiez l'**Option A** (installation manuelle). Pour reproduire l'environnement complet, utilisez `requirements-airflow.txt`.
-
-**Exemple d'exécution** :
-```bash
-$ python run_ingestion.py
-============================================================
-🚀 Démarrage de l'ingestion pour la date 20250615
-============================================================
-[INFO] Connexion à MinIO...
-[INFO] Lecture du fichier sales.csv...
-[INFO] Filtrage des données pour la date 2025-06-15...
-[INFO] 1247 lignes trouvées pour cette date
-[INFO] Chargement dans PostgreSQL...
-[INFO] Insertion dans products: 45 produits
-[INFO] Insertion dans customers: 892 clients
-[INFO] Insertion dans sale_items: 1247 transactions
-
-============================================================
-✅ Ingestion terminée avec succès pour 20250615
-============================================================
-```
-
-### Requêtes analytiques exemples
-```sql
--- Top 5 des produits les plus vendus
-SELECT 
-    product_name,
-    product_category,
-    SUM(quantity) as total_sold,
-    SUM(revenue) as total_revenue
-FROM vw_sales_star
-GROUP BY product_name, product_category
-ORDER BY total_revenue DESC
-LIMIT 5;
-
--- Évolution mensuelle du CA
-SELECT 
-    EXTRACT(YEAR FROM sale_date) as year,
-    EXTRACT(MONTH FROM sale_date) as month,
-    SUM(revenue) as monthly_revenue
-FROM vw_sales_star
-GROUP BY year, month
-ORDER BY year, month;
-
--- Segmentation clients par pays
-SELECT 
-    country,
-    COUNT(DISTINCT customer_name) as nb_clients,
-    SUM(revenue) as ca_total
-FROM vw_sales_star
-GROUP BY country
-ORDER BY ca_total DESC;
-```
+**Interpréter les statuts** :
+- Vert (Success) : La tâche s'est exécutée sans erreur
+- Rouge (Failed) : Erreur lors de l'exécution
+- Jaune (Running) : En cours d'exécution
+- Gris (No Status) : Pas encore exécutée
 
 ---
 
-## 🧪 Tests
+## Tests automatisés
+
+Le projet inclut des tests unitaires et d'intégration pour valider le bon fonctionnement du code.
+
+### Lancer tous les tests
+
+**Depuis le dossier racine du projet** :
+
+```bash
+docker exec -it airflow_scheduler pytest /opt/airflow/tests -v
+```
+
+**Résultat attendu** :
+
+```
+========================= test session starts =========================
+collected 3 items
+
+tests/test_ingestion_integration.py::test_integration_ingest_sales PASSED
+tests/test_ingestion_utils.py::test_ingest_sales_happy_path PASSED
+tests/test_ingestion_utils.py::test_nettoyer_age_range PASSED
+
+========================= 3 passed in 2.45s ==========================
+```
+
+**Tous les tests doivent afficher PASSED**.
+
+---
+
+## Tests automatisés
+
+Le projet inclut une suite de tests automatisés pour garantir la fiabilité et la qualité du code d'ingestion. Les tests sont écrits avec **pytest** et utilisent des **mocks** pour simuler les interactions avec la base de données et MinIO.
+
+### Organisation des tests
+
+Les tests sont organisés en deux catégories :
+
+```
+tests/
+├── __init__.py
+├── test_ingestion_integration.py   # Tests d'intégration
+└── test_ingestion_unit.py          # Tests unitaires
+```
+
+### Tests unitaires (`test_ingestion_unit.py`)
+
+Les tests unitaires vérifient le comportement de fonctions individuelles de manière isolée.
+
+#### test_integration_ingest_sales
+
+**Objectif** : Vérifier que le processus complet d'ingestion s'exécute correctement avec des données valides.
+
+**Ce qui est testé** :
+- La lecture des données depuis MinIO est appelée avec la bonne date
+- La connexion PostgreSQL est établie
+- Les fonctions d'upsert sont appelées au moins 4 fois (pour channels, campaigns, customers, products, sales, sale_items)
+
+**Technique** : Utilise des mocks pour simuler MinIO et PostgreSQL, évitant ainsi les dépendances externes.
+
+#### test_integration_error_handling
+
+**Objectif** : Vérifier que les erreurs de connexion à la base de données sont correctement propagées.
+
+**Ce qui est testé** :
+- Lorsque la connexion PostgreSQL échoue, une exception est levée
+- Le message d'erreur est explicite ("Database connection failed")
+
+**Importance** : Garantit que le pipeline ne masque pas les erreurs et permet un diagnostic rapide en production.
+
+### Tests d'intégration (`test_ingestion_integration.py`)
+
+Les tests d'intégration vérifient le comportement de plusieurs composants travaillant ensemble.
+
+#### test_nettoyer_age_range
+
+**Objectif** : Vérifier que les tranches d'âge sont correctement normalisées.
+
+**Cas testés** :
+- Les tranches standard restent inchangées : "18-25" → "18-25"
+- Les tranches 56+ sont normalisées : "56-65" → "56+", "65-70" → "56+", "66+" → "56+"
+- Les valeurs None sont préservées
+
+**Importance** : Cette transformation est critique pour l'homogénéité des données dans le data warehouse.
+
+### Lancer les tests
+
+#### Tous les tests
+
+```bash
+# Depuis le dossier racine du projet
+docker exec -it airflow_scheduler pytest /opt/airflow/tests -v
+```
+
+**Résultat attendu** :
+
+```
+========================= test session starts =========================
+collected 6 items
+
+tests/test_ingestion_integration.py::test_nettoyer_age_range PASSED
+tests/test_ingestion_integration.py::test_ingest_sales_happy_path PASSED
+tests/test_ingestion_integration.py::test_ingest_sales_no_data PASSED
+tests/test_ingestion_integration.py::test_ingest_sales_invalid_date_format PASSED
+tests/test_ingestion_unit.py::test_integration_ingest_sales PASSED
+tests/test_ingestion_unit.py::test_integration_error_handling PASSED
+
+========================= 6 passed in 2.30s =========================
+```
+
+**Tous les tests doivent afficher PASSED**.
+
+#### Un test spécifique
+
+```bash
+# Tester uniquement la normalisation des tranches d'âge
+docker exec -it airflow_scheduler pytest /opt/airflow/tests/test_ingestion_integration.py::test_nettoyer_age_range -v
+
+# Tester uniquement les tests unitaires
+docker exec -it airflow_scheduler pytest /opt/airflow/tests/test_ingestion_unit.py -v
+
+# Tester uniquement les tests d'intégration
+docker exec -it airflow_scheduler pytest /opt/airflow/tests/test_ingestion_integration.py -v
+```
+
+#### Tests avec rapport de couverture
+
+Pour voir quelles parties du code sont testées :
+
+```bash
+docker exec -it airflow_scheduler pytest /opt/airflow/tests --cov=/opt/airflow/ingestion --cov-report=term-missing
+```
 
 ### Stratégie de test
 
-✅ **Tests unitaires** : Fonctions utilitaires (`utils.py`)  
-✅ **Tests d'intégration** : Pipeline complet end-to-end  
-✅ **Tests de robustesse** : Gestion d'erreurs (date invalide, connexion DB)  
+#### Pourquoi utiliser des mocks ?
 
-### Exécution des tests
+Les mocks permettent de :
+- **Tester sans infrastructure** : Pas besoin que PostgreSQL ou MinIO soient disponibles
+- **Isoler le code** : Tester uniquement la logique métier, pas les dépendances externes
+- **Tester les cas d'erreur** : Simuler des pannes de base de données facilement
+
+#### Ce qui est mocké
+
+- `read_sales_from_minio` : Simule la lecture du fichier CSV depuis MinIO
+- `get_postgres_engine` : Simule la connexion PostgreSQL
+- `upsert_table` : Simule l'écriture en base de données
+- `pandas.read_sql` : Simule les lectures de tables existantes
+
+#### Ce qui n'est PAS mocké
+
+- Les transformations de données (nettoyage, normalisation)
+- La logique métier (extraction de channels, campaigns)
+- Les validations de données
+
+### Bonnes pratiques appliquées
+
+1. **Données de test réalistes** : Les fixtures utilisent des données qui ressemblent aux vraies données
+2. **Couverture complète** : Chemin nominal, cas d'erreur, cas limites (DataFrame vide)
+3. **Tests rapides** : Tous les tests s'exécutent en moins de 3 secondes
+4. **Tests isolés** : Chaque test peut s'exécuter indépendamment
+5. **Assertions claires** : Chaque test vérifie un comportement précis
+
+---
+
+## Résolution des problèmes
+
+### Problèmes courants et solutions
+
+| Problème | Diagnostic | Solution |
+|----------|------------|----------|
+| **"Port already in use"** | Un port est déjà utilisé par un autre service | **Windows** : `netstat -ano \| findstr :8081` puis tuer le processus<br>**Mac/Linux** : `lsof -ti:8081 \| xargs kill -9` |
+| **"Docker daemon not running"** | Docker Desktop n'est pas démarré | Ouvrir Docker Desktop et attendre l'icône verte |
+| **"sales.csv not found"** | Le fichier n'est pas au bon endroit | Vérifier que le fichier est dans `data/source/sales.csv`<br>Puis : `docker compose restart minio_init` |
+| **"Permission denied" (Linux)** | Votre utilisateur n'est pas dans le groupe docker | `sudo usermod -aG docker $USER`<br>Puis se déconnecter et reconnecter |
+| **Airflow ne démarre pas** | Erreur de configuration ou de base de données | `docker compose logs api-server`<br>Puis corriger l'erreur indiquée |
+| **Tables non créées** | Erreur dans les scripts SQL d'initialisation | `docker compose logs postgres_ecommerce`<br>Vérifier les scripts dans `sql/` |
+| **"No data found" dans Airflow** | Le DAG n'est pas détecté | Attendre 5 minutes (scan automatique)<br>Ou : `docker exec -it airflow_scheduler airflow dags reserialize` |
+| **0 ventes chargées** | La date spécifiée n'a pas de données | Vérifier les dates disponibles dans le CSV (voir section précédente)<br>Utiliser une date qui existe (ex: 20250414) |
+
+### Voir les logs d'un service
+
 ```bash
-# 1. Installer pytest
-pip install pytest pytest-cov
+# Logs en temps réel (tous les services)
+docker compose logs -f
 
-# 2. Lancer tous les tests
-pytest tests/ -v
+# Logs d'un service spécifique
+docker compose logs -f nom_du_service
 
-# Exemple de sortie :
-# tests/test_ingestion_utils.py::test_validate_date_format PASSED
-# tests/test_ingestion_utils.py::test_transform_customer_data PASSED
-# tests/test_ingestion_integration.py::test_full_ingestion_pipeline PASSED
-# ======================== 3 passed in 2.45s =========================
-
-# 3. Avec couverture de code
-pytest tests/ --cov=ingestion --cov-report=html
-
-# Ouvrir le rapport: htmlcov/index.html
+# Exemples
+docker compose logs -f airflow_scheduler
+docker compose logs -f postgres_ecommerce
+docker compose logs -f minio
 ```
 
-### Cas de test implémentés
+### Redémarrer un service
 
-| Test | Fichier | Description |
-|------|---------|-------------|
-| `test_validate_date_format` | `test_ingestion_utils.py` | Validation format YYYYMMDD |
-| `test_extract_from_minio` | `test_ingestion_utils.py` | Connexion et lecture MinIO |
-| `test_transform_duplicates` | `test_ingestion_utils.py` | Dédoublonnage clients |
-| `test_full_pipeline` | `test_ingestion_integration.py` | Ingestion complète E2E |
-| `test_idempotence` | `test_ingestion_integration.py` | Relance sans duplication |
+```bash
+# Redémarrer un service spécifique
+docker compose restart nom_du_service
+
+# Exemples
+docker compose restart airflow-scheduler
+docker compose restart api-server
+```
+
+### Redémarrer complètement le projet
+
+```bash
+# Depuis le dossier ecommerce-pipeline
+
+# Arrêter tous les services
+docker compose down
+
+# Redémarrer tous les services
+docker compose up -d
+```
+
+### Repartir de zéro (supprimer toutes les données)
+
+**ATTENTION** : Cette commande supprime TOUTES les données (base de données, fichiers, etc.)
+
+```bash
+# Depuis le dossier ecommerce-pipeline
+
+# Arrêter et supprimer tout y compris les volumes
+docker compose down -v
+
+# Redémarrer
+docker compose up -d --build
+```
+
+Après cette opération, vous devrez refaire l'ingestion des données.
 
 ---
 
-## 🤔 Choix techniques et justifications
+## Structure du projet
 
-### 1. PostgreSQL vs MySQL/MariaDB
-
-**Pourquoi PostgreSQL ?**
-
-✅ **Contraintes CHECK avancées** : Validation métier au niveau SGBD (DKNF)  
-✅ **Vues matérialisées** : Performance sur requêtes analytiques  
-✅ **Types personnalisés** : ENUM pour contraintes métier  
-✅ **JSON/JSONB** : Flexibilité pour évolutions futures  
-
-**Exemple concret** :
-```sql
-ALTER TABLE sale_items
-  ADD CONSTRAINT chk_discount_valid CHECK (discount_percent BETWEEN 0 AND 100);
 ```
-
-### 2. MinIO vs S3 direct
-
-**Pourquoi MinIO ?**
-
-✅ **Compatibilité API S3** : Code réutilisable en production AWS/GCP  
-✅ **Déploiement local** : Pas de compte cloud nécessaire pour la démo  
-✅ **Coût zéro** : Open-source et self-hosted  
-✅ **Interface web** : Visualisation des buckets  
-
-### 3. Airflow 3.x : TaskFlow API vs Operators classiques
-
-**Choix : TaskFlow API avec `@task` decorator**
-
-✅ **Lisibilité** : Code plus Pythonic et concis  
-✅ **Type hints** : Meilleure auto-complétion IDE  
-✅ **Gestion XCom automatique** : Pas de `ti.xcom_push/pull` manuel  
-
-**Exemple** :
-```python
-@task
-def run_ingestion(**context):
-    date_str = context['ds_nodash']
-    ingest_sales(date_str)
-```
-
-### 4. Idempotence : UPSERT vs DELETE + INSERT
-
-**Choix : UPSERT avec `ON CONFLICT DO UPDATE`**
-
-✅ **Atomicité** : Une seule transaction  
-✅ **Performance** : Pas de DELETE/INSERT coûteux  
-✅ **Sécurité** : Pas de perte de données en cas d'échec  
-
-**Implémentation** :
-```python
-INSERT INTO products (product_id, product_name, category, catalog_price)
-VALUES (%s, %s, %s, %s)
-ON CONFLICT (product_id) DO UPDATE SET
-    product_name = EXCLUDED.product_name,
-    catalog_price = EXCLUDED.catalog_price;
-```
-
-### 5. Logging : print() vs logging module
-
-**Choix : Module `logging` Python**
-
-✅ **Niveaux de log** : INFO, WARNING, ERROR  
-✅ **Format standardisé** : Timestamp, niveau, message  
-✅ **Intégration Airflow** : Logs visibles dans l'UI  
-
-**Configuration** :
-```python
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
-logger = logging.getLogger(__name__)
-logger.info("Début de l'ingestion pour la date %s", date_str)
-```
-
-### 6. 3FN vs DKNF : Pourquoi aller plus loin ?
-
-**Contexte e-commerce** :
-
-| Risque sans DKNF | Impact | Solution DKNF |
-|------------------|--------|---------------|
-| Prix négatif | Perte financière | `CHECK (price > 0)` |
-| Quantité = 0 | Commande fantôme | `CHECK (quantity > 0)` |
-| Remise > 100% | Incohérence comptable | `CHECK (discount_percent BETWEEN 0 AND 100)` |
-
-**Conclusion** : Dans un contexte avec **intégrité critique** (transactions financières), la DKNF déplace la validation du code vers le SGBD → **garantie absolue** même en cas d'accès direct SQL.
-
-### 7. Docker Compose : services séparés vs monolithique
-
-**Choix : Architecture microservices**
-
-✅ **Isolation** : Redémarrage d'un service n'affecte pas les autres  
-✅ **Scalabilité** : Ajout facile de workers Airflow  
-✅ **Debugging** : Logs séparés par service  
-✅ **Production-ready** : Pattern standard Kubernetes  
-
----
-
-## 📁 Structure du projet
-```
-Projet_artefact/
-│
-├── 📂 data/                      # Données sources
+ecommerce-pipeline/
+├── data/
 │   └── source/
-│       └── sales.csv             # ⭐ Fichier fourni par Artefact
-│
-├── 📂 docker/                    # Configurations Docker
-│   └── Dockerfile                # Image custom Airflow 3.x
-│
-├── 📂 docs/                      # 📄 Documentation complète
-│   ├── data_model/
-│   │   ├── logical_data_model.png       # Diagramme ERD
-│   │   └── logical_data_model.drawio    # Source éditable
-│   │
-│   │── analysis_exploratoire.ipynb              # ⭐ Notebook Jupyter
-│   └── data_modeling.md                 # ⭐ Raisonnement de modélisation
-│
-├── 📂 ingestion/                 # 🐍 Module Python ETL
+│       └── sales.csv              # Fichier de données source (à placer manuellement)
+├── docker-compose.yml             # Configuration de tous les services Docker
+├── docker/
+│   └── Dockerfile                 # Image Docker pour Airflow
+├── sql/                           # Scripts SQL d'initialisation
+│   ├── 01_schema.sql              # Création du schéma ecommerce
+│   ├── 02_tables_dknf.sql         # Tables normalisées (DKNF)
+│   ├── 03_views_star_schema.sql   # Vues analytiques (star schema)
+│   └── 04_constraints_indexes.sql # Contraintes et index
+├── scripts/
+│   └── init-db.sh                 # Script d'initialisation PostgreSQL
+├── ingestion/                     # Code Python d'ingestion
 │   ├── __init__.py
-│   ├── config.py                 # Configuration (env vars)
-│   ├── main.py                   # ⭐ Pipeline principal
-│   └── utils.py                  # Fonctions utilitaires
-│
-├── 📂 airflow/                   # Airflow DAGs & config
+│   ├── config.py                  # Configuration (connexions DB, MinIO)
+│   ├── main.py                    # Point d'entrée du script d'ingestion
+│   └── utils.py                   # Fonctions utilitaires (connexions, UPSERT)
+├── airflow/
 │   ├── dags/
-│   │   └── dag_ingestion.py      # ⭐ DAG quotidien
-│   ├── logs/                     # Logs d'exécution
-│   └── plugins/                  # Custom operators
-│
-├── 📂 scripts/                   # Scripts d'initialisation
-│   └── init-db.sh                # ⭐ Auto-création tables DKNF
-│
-├── 📂 sql/                       # 📜 Scripts SQL (PostgreSQL)
-│   ├── 01_schema.sql             # Schéma
-│   ├── 02_tables_dknf.sql        # ⭐ Tables normalisées DKNF
-│   ├── 03_views_star_schema.sql  # ⭐ Vue analytique
-│   └── 04_constraints_indexes.sql # ⭐ Contraintes FK + index
-│
-├── 📂 tests/                     # 🧪 Tests automatisés
-│   ├── __init__.py
-│   ├── test_ingestion_integration.py  # Tests E2E
-│   └── test_ingestion_utils.py        # Tests unitaires
-│
-├── 🐳 docker-compose.yml         # ⭐ Orchestration complète
-├── 📋 requirements-airflow.txt   # ⭐ Dépendances Airflow + ETL
-├── 📋 requirements-eda.txt       # ⭐ Dépendances analyse exploratoire
-├── 🐍 run_ingestion.py           # ⭐ Script de test rapide
-├── ⚙️ pytest.ini                 # Configuration tests
-└── 📖 README.md                  # ⭐ Ce fichier
+│   │   └── ingestion_dag.py       # DAG Airflow pour orchestration
+│   ├── logs/                      # Logs d'exécution Airflow
+│   └── plugins/                   # Plugins Airflow (vide)
+├── tests/                         # Tests automatisés
+│   ├── test_ingestion_utils.py    # Tests unitaires
+│   └── test_ingestion_integration.py # Tests d'intégration
+├── docs/                          # Documentation complémentaire
+│   ├── data_modeling.md           # Justifications de modélisation
+│   └── analysis_exploratoire.ipynb # Notebook d'analyse exploratoire
+└── README.md                      # Ce fichier
 ```
-
-**Légende** :
-- ⭐ = Fichiers critiques pour l'évaluation
-- 📂 = Dossiers structurants
-- 🐍 = Code Python
-- 📜 = Scripts SQL
-- 🐳 = Infrastructure Docker
 
 ---
 
-## 📚 Documentation
+## Documentation complémentaire
 
-### 1. Analyse exploratoire
+Le projet inclut deux documents détaillés pour approfondir les aspects techniques et analytiques.
 
-**Fichier** : [`docs/analysis_exploratoire.ipynb`](docs/analysis_exploratoire.ipynb)
+### Modélisation des données
 
-**Contenu** :
-- ✅ Statistiques descriptives (cardinalité, missing values)
-- ✅ Distribution des ventes par catégorie
-- ✅ Analyse temporelle (saisonnalité, tendances)
-- ✅ Détection d'anomalies (outliers, doublons)
-- ✅ Identification des entités métier
+**Document** : [docs/data_modeling.md](docs/data_modeling.md)
 
-### 2. Modélisation des données
-
-**Fichier** : [`docs/data_modeling.md`](docs/data_modeling.md)
+Ce document présente en détail les décisions de modélisation de la base de données :
 
 **Contenu** :
-- ✅ **Raisonnement complet** : De l'EDA jusqu'à la DKNF
-- ✅ Démarche de normalisation 1FN → 2FN → 3FN → DKNF
-- ✅ Diagramme ERD (Entité-Relation)
-- ✅ Justification de chaque choix de modélisation
-- ✅ Dictionnaire de données (types, contraintes)
-- ✅ Stratégie de séparation OLTP (3FN) / OLAP (Star Schema)
+- Justification de la normalisation jusqu'à la DKNF
+- Explication du schéma en étoile (star schema)
+- Choix des clés primaires et étrangères
+- Stratégies d'indexation
 
-### 3. API Airflow : Connexions et Variables
 
-**Connexions configurées** (via environment variables) :
-```yaml
-# Dans docker-compose.yml
-AIRFLOW_CONN_POSTGRES_ECOMMERCE: postgresql://ecommerce_user:ecommerce123@postgres:5432/ecommerce
-AIRFLOW_CONN_MINIO_S3: aws://minioadmin:minioadmin123@?endpoint_url=http://minio:9000
+
+### Analyse exploratoire des données
+
+**Document** : [docs/analysis_exploratoire.ipynb](docs/analysis_exploratoire.ipynb)
+
+Ce notebook Jupyter présente une analyse complète du fichier `sales.csv` :
+
+**Contenu** :
+- Distribution des ventes par catégorie, canal, pays
+- Détection des anomalies dans les données
+- Statistiques descriptives
+- Graphiques et visualisations
+
+
+**Ouvrir le notebook** :
+
+```bash
+# Depuis le dossier racine du projet
+
+# 1. Installer Jupyter et les dépendances (première fois uniquement)
+pip install - r requirements_eda.txt 
+   #ou simplement
+pip install jupyter pandas matplotlib seaborn plotly
+
+# 2. Lancer Jupyter Notebook
+jupyter notebook
+
+# 3. Dans l'interface web qui s'ouvre, naviguer vers docs/analysis_exploratoire.ipynb
 ```
 
-**Variables configurées** :
-```yaml
-AIRFLOW_VAR_MINIO_BUCKET: folder-source
-AIRFLOW_VAR_SOURCE_FILE: sales.csv
-```
-
-### 4. Gestion des dépendances
-
-**Fichiers requirements** :
-```txt
-requirements-airflow.txt    # Utilisé par Dockerfile.airflow
-requirements-eda.txt        # Utilisé pour les notebooks Jupyter
-```
-
-**Structure modulaire** :
-- ✅ `requirements-airflow.txt` : Apache Airflow + providers PostgreSQL/Amazon + pandas + psycopg2-binary + boto3
-- ✅ `requirements-eda.txt` : jupyter + matplotlib + seaborn + plotly + pandas
-
-**Justification** : Séparation des environnements pour éviter les conflits de versions et optimiser les images Docker.
+**Alternative : Visualiser sans installer Jupyter** :
+- Ouvrir le fichier directement sur GitHub (si le projet est hébergé sur GitHub)
+- Utiliser VSCode avec l'extension "Jupyter" installée
 
 ---
 
-## 🛠️ Troubleshooting
+## Commandes de référence rapide
 
-### Problème : Tables DKNF non créées au démarrage
+### Gestion Docker Compose
 
-**Symptôme** :
 ```bash
-$ docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce -c "\dt"
-Did not find any relations.
+# Démarrer tous les services
+docker compose up -d
+
+# Arrêter tous les services
+docker compose down
+
+# Voir le statut des services
+docker compose ps
+
+# Voir les logs
+docker compose logs -f
+
+# Redémarrer un service
+docker compose restart nom_du_service
+
+# Reconstruire et redémarrer
+docker compose up -d --build --force-recreate
 ```
 
-**Solution** :
-```bash
-# Vérifier les logs d'initialisation
-docker logs postgres_ecommerce | grep "sql"
+### Ingestion de données
 
-# Relancer l'initialisation manuellement
-docker exec -it postgres_ecommerce bash -c "
-  psql -U ecommerce_user -d ecommerce < /sql/01_schema.sql &&
-  psql -U ecommerce_user -d ecommerce < /sql/02_tables_dknf.sql &&
-  psql -U ecommerce_user -d ecommerce < /sql/03_views_star_schema.sql &&
-  psql -U ecommerce_user -d ecommerce < /sql/04_constraints_indexes.sql
-"
+```bash
+# Méthode 1 : Script Python direct (depuis le dossier racine du projet)
+docker exec -it airflow_scheduler python /opt/airflow/ingestion/main.py 20250414
+
+# Méthode 2 : Test du DAG Airflow (depuis le dossier racine du projet)
+docker exec -it airflow_scheduler airflow dags test ingestion_ventes_quotidien 2025-04-14
+
+# Méthode 3 : Via l'interface web
+# http://localhost:8081 > Trigger DAG
 ```
 
-### Problème : Airflow ne voit pas le DAG
+### Vérification PostgreSQL
 
-**Solution** :
 ```bash
-# Forcer le rechargement
-docker exec -it airflow_scheduler airflow dags reserialize
+# Se connecter à PostgreSQL
+docker exec -it postgres_ecommerce psql -U ecommerce_user -d ecommerce
+
+# Requêtes utiles (une fois connecté)
+# \dt ecommerce.*                    -- Lister les tables
+# \d ecommerce.customers             -- Structure d'une table
+# SELECT COUNT(*) FROM ecommerce.sales;  -- Compter les ventes
+# \q                                 -- Quitter
+```
+
+### Tests
+
+```bash
+# Lancer tous les tests (depuis le dossier racine du projet)
+docker exec -it airflow_scheduler pytest /opt/airflow/tests -v
+
+# Lancer un test spécifique
+docker exec -it airflow_scheduler pytest /opt/airflow/tests/test_ingestion_integration.py::test_nettoyer_age_range -v
+
+# Tests avec rapport de couverture
+docker exec -it airflow_scheduler pytest /opt/airflow/tests --cov=/opt/airflow/ingestion --cov-report=term-missing
+```
+
+### Vérification Airflow
+
+```bash
+# Lister les DAGs (depuis le dossier racine du projet)
+docker exec -it airflow_scheduler airflow dags list
 
 # Vérifier les erreurs d'import
-docker exec -it airflow_webserver airflow dags list-import-errors
-```
+docker exec -it airflow_scheduler airflow dags list-import-errors
 
-### Problème : Fichier sales.csv non uploadé dans MinIO
-
-**Solution** :
-```bash
-# Relancer le service d'initialisation MinIO
-docker-compose up -d minio_init
-
-# Vérifier les logs
-docker logs minio_init
+# Activer un DAG
+docker exec -it airflow_scheduler airflow dags unpause ingestion_ventes_quotidien
 ```
 
 ---
 
-## 👤 Auteur
+## Contact
 
-**Adele Coulibaly**  
-Candidat Stagiaire Data Engineer - Artefact CI  
-📧 adele@artefact.ci
+**Candidat** : Adele Coulibaly  
+**Email** : foungniguecoulibaly24@inphb.ci  
+**Date de réalisation** : Février 2026
 
 ---
-
